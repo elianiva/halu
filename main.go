@@ -59,31 +59,31 @@ func main() {
 			prompt = strings.Join(msg, " ")
 			manCtx = ctxStore[m.Sender.ID]
 
-			if m.IsReply() {
-				fmt.Println("Prev: ", yukiCtx, manCtx, ctxStore)
+			manCtx = ctxStore[m.Sender.ID]
+			yukiCtx = m.ReplyTo.Text
 
-				manCtx = ctxStore[m.Sender.ID]
-				yukiCtx = m.ReplyTo.Text
-
-				// save for future context
-				ctxStore[m.Sender.ID] = prompt
-
-				fmt.Println("Current: ", yukiCtx, manCtx, ctxStore)
-			}
+			// save for future context
+			ctxStore[m.Sender.ID] = prompt
 		} else if m.Private() {
 			prompt = strings.Join(msg, " ")
 		} else {
 			return
 		}
 
-		reply, err := getReply(name, prompt, manCtx, yukiCtx)
+		reply, err := getReply(prompt, manCtx, yukiCtx)
 		if err != nil {
-			b.Reply(m, "Hehehe.. aku lagi linglung")
+			_, err := b.Reply(m, "Hehehe.. aku lagi linglung")
+			if err != nil {
+				log.Printf("%v", err)
+			}
 			log.Printf("%v", err)
 		}
 
 		re := regexp.MustCompile("(?i)(Yuki):")
-		b.Reply(m, re.ReplaceAllString(reply, ""))
+		_, err = b.Reply(m, re.ReplaceAllString(reply, ""))
+		if err != nil {
+			log.Printf("%v", err)
+		}
 	})
 
 	go func() {
@@ -97,10 +97,13 @@ func main() {
 	fmt.Println("Terminating...")
 }
 
-func getReply(kind, prompt, manCtx, yukiCtx string) (string, error) {
+func getReply(prompt, manCtx, yukiCtx string) (string, error) {
 	bot := getYuki(prompt, manCtx, yukiCtx)
 
-	b, _ := json.Marshal(bot)
+	b, err := json.Marshal(bot)
+	if err != nil {
+		return "", err
+	}
 
 	req, err := http.NewRequest("POST", "https://api.openai.com/v1/engines/"+bot.Engine+"/completions", bytes.NewBuffer(b))
 	if err != nil {
@@ -112,13 +115,16 @@ func getReply(kind, prompt, manCtx, yukiCtx string) (string, error) {
 		return "", err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: time.Second * 60}).Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
 
 	var data AIResponse
 	err = json.Unmarshal(body, &data)
@@ -132,7 +138,8 @@ func getReply(kind, prompt, manCtx, yukiCtx string) (string, error) {
 func getYuki(prompt, manCtx, yukiCtx string) RequestBody {
 	req := RequestBody{
 		Engine: "davinci",
-		Prompt: "Below is a conversation between lovers. The man is charming while the woman is very friendly, lovely, and sweet. Here name is Yuki" +
+		// if you're wondering, no, this conversation wasn't my idea, I googled it
+		Prompt: "Below is a conversation between lovers. The man is charming while the woman is very friendly, lovely, and sweet. Her name is Nishiyama Yuki." +
 			"\n" +
 			"Man: Will you be my princess?\n" +
 			"Yuki: Your princess? :3\n" +
